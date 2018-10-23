@@ -85,6 +85,9 @@ class DataFlow(object):
         self.rng = get_rng(self)
         self._setup()
 
+    def set_epochs_completed(self, val):
+        self._set_epochs_completed(val)
+
     def _set_epochs_completed(self, val):
         self._epochs_completed  = val
 

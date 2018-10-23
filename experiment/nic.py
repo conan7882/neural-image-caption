@@ -39,6 +39,8 @@ def get_args():
                         help='Train the model.')
     parser.add_argument('--generate', action='store_true',
                         help='Sampling from trained model')
+    parser.add_argument('--train_small', action='store_true',
+                        help='Train the model.')
 
     parser.add_argument('--load', type=int, default=99,
                         help='Load step of pre-trained')
@@ -56,15 +58,51 @@ def get_args():
     parser.add_argument('--hidden', type=int, default=[512],
                         help='')
 
-
     return parser.parse_args()
+
+def generate():
+    FLAGS = get_args()
+    test_image_data = loader.load_test_im(batch_size=1, verbose=True)
+    word_to_id, id_to_word = loader.load_coco_word_dict()
+    vocab_size = len(id_to_word)
+
+    generate_model = NIC_tfrecord(
+        n_channel=3,
+        vocab_size=vocab_size,
+        embedding_dim=FLAGS.embedding,
+        rnn_hidden_list=FLAGS.hidden,
+        start_word_id=word_to_id['START'],
+        stop_word_id=word_to_id['.'],
+        bsize=1,
+        inception_path=CNN_PATH)
+    generate_model.create_generate_model()
+
+    sessconfig = tf.ConfigProto()
+    sessconfig.gpu_options.allow_growth = True
+    with tf.Session(config=sessconfig) as sess:
+        saver = tf.train.Saver()
+        sess.run(tf.global_variables_initializer())
+
+        saver.restore(sess, '{}epoch-{}'.format(SAVE_PATH, FLAGS.load))
+        step_id = 0
+        while test_image_data.epochs_completed == 0:
+            step_id += 1
+            print('======= {} ======='.format(step_id))
+            batch_data = test_image_data.next_batch_dict()
+            generate_text = sess.run(
+                [generate_model.layers['generate'], generate_model.layers['sampling_generate']],
+                feed_dict={generate_model.image: batch_data['image']})
+            for gen_list in generate_text:
+                print('------------------------------------------------')
+                for text in gen_list:
+                    print([id_to_word[w_id] for w_id in text])
 
 def train_tfrecord():
     FLAGS = get_args()
-    train_data = loader.load_inception_coco(batch_size=FLAGS.bsize, shuffle=True)
-    train_data_origin, valid_data = loader.load_coco(batch_size=2)
+    train_data, valid_data = loader.load_inception_coco(batch_size=FLAGS.bsize, shuffle=True)
+    # train_data_origin, valid_data_origin = loader.load_coco(batch_size=2)
     # valid_data.setup(epoch_val=0, batch_size=2)
-    test_image_data = loader.load_test_im(batch_size=2)
+    # test_image_data = loader.load_test_im(batch_size=2)
 
     id_to_word = train_data.id_to_word
     word_to_id = train_data.word_dict
@@ -78,7 +116,7 @@ def train_tfrecord():
                       stop_word_id=word_to_id['.'])
     train_model.create_train_model()
 
-    generate_model = NIC(n_channel=3,
+    generate_model = NIC_tfrecord(n_channel=3,
                       vocab_size=vocab_size,
                       embedding_dim=FLAGS.embedding,
                       rnn_hidden_list=FLAGS.hidden,
@@ -96,53 +134,61 @@ def train_tfrecord():
         sess.run(tf.local_variables_initializer())
         sess.run(tf.global_variables_initializer())
         train_data.before_read_setup()
+        valid_data.before_read_setup()
         writer.add_graph(sess.graph)
-        # saver.restore(sess, '{}epoch-{}'.format(SAVE_PATH, 20))
+        # saver.restore(sess, '{}epoch-{}'.format(SAVE_PATH, 119))
         for epoch_id in range(FLAGS.maxepoch):
 
             train_model.train_epoch(
                 sess, train_data, init_lr=FLAGS.lr,
-                keep_prob=0.5, summary_writer=writer)
+                keep_prob=FLAGS.keep_prob, summary_writer=writer)
             saver.save(sess, '{}epoch-{}'.format(SAVE_PATH, epoch_id))
 
-            print('======= Train =======')
-            batch_data = train_data_origin.next_batch_dict()
-            generate_text = sess.run(
-                generate_model.layers['generate'],
-                # [generate_model.test1, generate_model.test2],
-                feed_dict={generate_model.image: batch_data['image']})
-            for text in generate_text:
-                print([id_to_word[w_id] for w_id in text])
-            print('-- label --')
-            for text in batch_data['caption']:
-                print([id_to_word[w_id] for w_id in text])
+            generate_model.valid_epoch(
+                sess, valid_data, epoch_id, summary_writer=None)
 
-            print('======= Valid =======')
-            batch_data = valid_data.next_batch_dict()
-            generate_text = sess.run(
-                generate_model.layers['generate'],
-                # [generate_model.test1, generate_model.test2],
-                feed_dict={generate_model.image: batch_data['image']})
-            for text in generate_text:
-                print([id_to_word[w_id] for w_id in text])
-            print('-- label --')
-            for text in batch_data['caption']:
-                print([id_to_word[w_id] for w_id in text])
+            # print('======= Train =======')
+            # batch_data = train_data_origin.next_batch_dict()
+            # generate_text = sess.run(
+            #     [generate_model.layers['generate'], generate_model.layers['sampling_generate']],
+            #     # [generate_model.test1, generate_model.test2],
+            #     feed_dict={generate_model.image: batch_data['image']})
+            # for gen_list in generate_text:
+            #     print('------------------------------------------------')
+            #     for text in gen_list:
+            #         print([id_to_word[w_id] for w_id in text])
+            #     print('-- label --')
+            #     for text in batch_data['caption']:
+            #         print([id_to_word[w_id] for w_id in text])
 
-            print('======= Test =======')
-            batch_data = test_image_data.next_batch_dict()
-            generate_text = sess.run(
-                generate_model.layers['generate'],
-                # [generate_model.test1, generate_model.test2],
-                feed_dict={generate_model.image: batch_data['image']})
-            for text in generate_text:
-                print([id_to_word[w_id] for w_id in text])
-                
-            # print(test1)
-            # print(list(test2))
-            # break
+            # print('======= Valid =======')
+            # batch_data = valid_data_origin.next_batch_dict()
+            # generate_text = sess.run(
+            #     [generate_model.layers['generate'], generate_model.layers['sampling_generate']],
+            #     # [generate_model.test1, generate_model.test2],
+            #     feed_dict={generate_model.image: batch_data['image']})
+            # for gen_list in generate_text:
+            #     print('------------------------------------------------')
+            #     for text in gen_list:
+            #         print([id_to_word[w_id] for w_id in text])
+            #     print('-- label --')
+            #     for text in batch_data['caption']:
+            #         print([id_to_word[w_id] for w_id in text])
+
+            # print('======= Test =======')
+            # batch_data = test_image_data.next_batch_dict()
+            # generate_text = sess.run(
+            #     [generate_model.layers['generate'], generate_model.layers['sampling_generate']],
+            #     # [generate_model.test1, generate_model.test2],
+            #     feed_dict={generate_model.image: batch_data['image']})
+            # for gen_list in generate_text:
+            #     print('------------------------------------------------')
+            #     for text in gen_list:
+            #         print([id_to_word[w_id] for w_id in text])
+                    
 
         train_data.after_reading()
+        valid_data.after_reading()
 
 
 def train():
@@ -180,12 +226,12 @@ def train():
         saver = tf.train.Saver()
         sess.run(tf.global_variables_initializer())
         writer.add_graph(sess.graph)
-        saver.restore(sess, '{}epoch-{}'.format(SAVE_PATH, 20))
+        # saver.restore(sess, '{}epoch-{}'.format(SAVE_PATH, 20))
         for epoch_id in range(FLAGS.maxepoch):
 
             train_model.train_epoch(
                 sess, train_data, init_lr=FLAGS.lr,
-                keep_prob=0.5, summary_writer=writer)
+                keep_prob=FLAGS.keep_prob, summary_writer=writer)
             saver.save(sess, '{}epoch-{}'.format(SAVE_PATH, epoch_id))
 
             batch_data = valid_data.next_batch_dict()
@@ -203,4 +249,10 @@ def train():
             # break
 
 if __name__ == '__main__':
-    train_tfrecord()
+    FLAGS = get_args()
+    if FLAGS.train:
+        train_tfrecord()
+    if FLAGS.generate:
+        generate()
+    if FLAGS.train_small:
+        train()

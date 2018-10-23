@@ -12,6 +12,7 @@ from src.utils.tfutils import apply_mask
 import src.models.layers as L
 import src.models.modules as modules
 import src.models.inception_module as inception_module
+import src.models.metric as metric
 
 
 INIT_W = tf.keras.initializers.he_normal()
@@ -57,7 +58,7 @@ class NIC_tfrecord(BaseModel):
         self.set_is_training(is_training=True)
         self._create_train_input()
         with tf.variable_scope('model', reuse=tf.AUTO_REUSE):
-            image_embedding, words_embedding = self._embedding_layer(self.image_feat, self.label, compute_feat=False)
+            image_embedding, words_embedding = self._embedding_layer(self.label, compute_feat=False)
             out_logits = self._rnn(image_embedding, words_embedding)
 
         self.layers['out_logits'] = out_logits
@@ -66,9 +67,12 @@ class NIC_tfrecord(BaseModel):
         self.global_step = 0
         self.train_op = self.get_train_op()
         self.loss_op = self.get_loss()
+        self.perplexity_op = self.get_perplexity()
         self.cur_lr = None
 
     def _create_generate_input(self):
+        self.image_feat = tf.placeholder(
+            tf.float32, [None, 7, 7, 1024], name='image_feat')
         self.image = tf.placeholder(
             tf.float32, [None, 224, 224, self._n_channel], name='image')
         self.label = tf.placeholder(tf.int64, [None, None], 'label')
@@ -83,10 +87,10 @@ class NIC_tfrecord(BaseModel):
             start_word = [[self._start_id]]
             start_word = tf.tile(start_word, (bsize, 1))
             # start_word = [[self._start_id] for i in range(bsize)]
-            image_embedding, words_embedding = self._embedding_layer(self.image, start_word)
-            self.layers['generate'] = self._generate_sequence(image_embedding, words_embedding)
+            image_embedding, _ = self._embedding_layer(start_word, compute_feat=False)
+            self.layers['sampling_generate'], self.layers['rnn_out'] = self._generate_sequence(image_embedding)
         
-    def _embedding_layer(self, image_inputs, words_inputs, compute_feat=True):
+    def _embedding_layer(self, words_inputs, compute_feat=True):
         words_embedding = modules.word_embedding_layer(
             inputs=words_inputs,
             vocab_size=self._vocab_size,
@@ -95,11 +99,11 @@ class NIC_tfrecord(BaseModel):
 
         if compute_feat:
             inception_conv_out = inception_module.Inception_conv_embedding(
-                inputs=image_inputs,
+                inputs=self.image,
                 pretrained_dict=self._pretrained_dict,
                 name='Inception_conv')
         else:
-            inception_conv_out = image_inputs
+            inception_conv_out = self.image_feat
 
         image_embedding = L.linear(
             out_dim=self._embedding_dim,
@@ -109,8 +113,10 @@ class NIC_tfrecord(BaseModel):
             bn=BN,
             is_training=self.is_training,
             name='image_embedding_linear',
-            # nl=tf.identity,
+            nl=tf.nn.relu,
             add_summary=False)
+        if self.is_training:
+            image_embedding = tf.nn.dropout(image_embedding, keep_prob=self.keep_prob)
         image_embedding = tf.reshape(image_embedding, (-1, 1, self._embedding_dim))
 
         return image_embedding, words_embedding
@@ -131,7 +137,7 @@ class NIC_tfrecord(BaseModel):
                 inputs=rnn_out,
                 init_w=INIT_W,
                 wd=0,
-                bn=BN,
+                bn=False,
                 is_training=self.is_training,
                 name='rnn_output',
                 # nl=tf.identity,
@@ -157,13 +163,42 @@ class NIC_tfrecord(BaseModel):
             out_logits = tf.reshape(out_logits, [-1, step_len, self._vocab_size])
             return out_logits, state
 
-    def _generate_sequence(self, image_embedding, start_embedding):
+    def _generate_sequence(self, image_embedding):
         # get initial state from image embedding
         _, state = self._rnn_generate(image_embedding, state=None)
-        gen_word_list = self._beam_search(
-            state=state, start_token=self._start_id, num_beam=self._n_beam,
-            max_step=self._max_step)
-        return gen_word_list
+        # beam_search_gen = self._beam_search(
+        #     state=state,
+        #     start_token=self._start_id,
+        #     num_beam=self._n_beam,
+        #     max_step=self._max_step)
+        sampling_gen, rnn_prob = self._sampling(
+            state,
+            start_token=self._start_id, 
+            max_step=self._max_step,
+            bsize=tf.shape(image_embedding)[0])
+        return sampling_gen, rnn_prob
+
+    def _sampling(self, state, start_token, max_step, bsize):
+        start_word = [[start_token]]
+        prev_word = tf.tile(start_word, (bsize, 1))
+        generate_word_list = tf.cast(prev_word, tf.int64)
+        rnn_out_list = []
+
+        for out_step in range(max_step):
+            flatten_word = tf.reshape(prev_word, (-1, 1))
+            word_embedding = modules.word_embedding_layer(
+                inputs=flatten_word,
+                vocab_size=self._vocab_size,
+                embedding_dim=self._embedding_dim,
+                name='word_embedding_layer')
+            rnn_out, state = self._rnn_generate(word_embedding, state)
+            prev_word = tf.argmax(rnn_out, axis=-1)
+            generate_word_list = tf.concat((generate_word_list, prev_word), axis=1)
+            rnn_out_list.append(rnn_out)
+        rnn_out_list = tf.stack(rnn_out_list, axis=1)
+        rnn_out_list = tf.squeeze(rnn_out_list, axis=2) # [batch, num_step, num_verbose]
+        rnn_prob = tf.nn.softmax(rnn_out_list, axis=-1)
+        return generate_word_list[:, 1:], rnn_prob
 
     def _beam_search(self, state, start_token, num_beam, max_step):
         """
@@ -208,9 +243,6 @@ class NIC_tfrecord(BaseModel):
             
             prev_idx = [[i] for i in range(bsize * cur_num_beam)]
 
-        # self.test1 = state
-        # self.test2 = top_word_idx
-        # return generate_word_list
         return tf.squeeze(generate_word_list, axis=1)
                     
     def _get_loss(self):
@@ -226,6 +258,10 @@ class NIC_tfrecord(BaseModel):
                 name='cross_entropy_loss')
             return tf.reduce_mean(cross_entropy_loss)
 
+    def get_perplexity(self):
+        with tf.name_scope('perplexity'):
+            return metric.get_perplexity(self.layers['out_logits'], self.valid_mask)
+
     def get_train_op(self):
         with tf.name_scope('train_op'):
             tvars = tf.trainable_variables()
@@ -237,10 +273,43 @@ class NIC_tfrecord(BaseModel):
             train_op = opt.apply_gradients(grads, name='train_op')
             return train_op
 
+    def valid_epoch(self, sess, valid_data, epoch_id, summary_writer=None):
+        display_name_list = ['perplexity']
+        cur_summary = None
+
+        valid_data.set_epochs_completed(0) 
+
+        step = 0
+        # loss_sum = 0
+        perplexity_sum = 0
+
+        while valid_data.epochs_completed == 0:
+
+            step += 1
+            batch_data = valid_data.next_batch_dict()
+            gen_list, rnn_out = sess.run(
+                [self.layers['sampling_generate'], self.layers['rnn_out']],
+                feed_dict={self.image_feat: batch_data['image']})
+            # print(np.array(rnn_out).shape)
+            # print(np.array(gen_list).shape)
+
+            perplexity = metric.np_get_perplexity(rnn_out, gen_list, self._stop_id)
+            perplexity_sum += perplexity
+
+        viz.display(
+            epoch_id,
+            step,
+            [perplexity_sum],
+            display_name_list,
+            'valid',
+            summary_val=cur_summary,
+            summary_writer=summary_writer)
+
+
     def train_epoch(self, sess, train_data, init_lr,
                     keep_prob=1.0, summary_writer=None):
 
-        display_name_list = ['loss']
+        display_name_list = ['loss', 'perplexity']
         cur_summary = None
 
         if self.cur_lr is None:
@@ -253,14 +322,15 @@ class NIC_tfrecord(BaseModel):
         cur_epoch = train_data.epochs_completed
         step = 0
         loss_sum = 0
+        perplexity_sum = 0
         self.epoch_id += 1
         while cur_epoch == train_data.epochs_completed:
             self.global_step += 1
             step += 1
 
             batch_data = train_data.next_batch_dict()
-            _, loss = sess.run(
-                [self.train_op, self.loss_op],
+            _, loss, perplexity = sess.run(
+                [self.train_op, self.loss_op, self.perplexity_op],
                 feed_dict={self.label: batch_data['caption'],
                            self.image_feat: batch_data['image'],
                            self.valid_mask: batch_data['mask'],
@@ -268,6 +338,7 @@ class NIC_tfrecord(BaseModel):
                            self.lr: lr})
 
             loss_sum += loss
+            perplexity_sum += perplexity
             if step % 100 == 0:
             #     cur_summary = sess.run(
             #         self.train_summary_op, 
@@ -281,7 +352,7 @@ class NIC_tfrecord(BaseModel):
                 viz.display(
                     self.global_step,
                     step,
-                    [loss_sum],
+                    [loss_sum, perplexity_sum],
                     display_name_list,
                     'train',
                     summary_val=cur_summary,
@@ -299,7 +370,7 @@ class NIC_tfrecord(BaseModel):
         viz.display(
             self.global_step,
             step,
-            [loss_sum],
+            [loss_sum, perplexity_sum],
             display_name_list,
             'train',
             summary_val=cur_summary,

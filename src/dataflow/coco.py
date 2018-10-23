@@ -10,7 +10,7 @@ from collections import defaultdict
 import numpy as np
 import tensorflow as tf
 from src.dataflow.base import DataFlow
-from src.utils.dataflow import get_file_list, load_image
+from src.utils.dataflow import get_file_list, load_image, fill_pf_list
 import src.utils.utils as utils
 from src.dataflow.tfdata import Bottleneck2TFrecord, int64_feature, tfrecordData
 
@@ -81,6 +81,9 @@ class Inception_COCO(DataFlow):
         batch_data = [np.array(raw_batch_data[0]), np.array(truncate_caption), np.array(caption_mask)]
         return batch_data
 
+    def set_epochs_completed(self, val):
+        self.tfdata.set_epochs_completed(val)
+
     def _set_epochs_completed(self, val):
         self.tfdata._set_epochs_completed(val)
 
@@ -116,15 +119,18 @@ class COCO(DataFlow):
                  ann_dir='',
                  shuffle=True,
                  batch_dict_name=None,
-                 pf_list=None):
+                 pf_list=None,
+                 is_all_reference=False):
+        self._all_reference = is_all_reference
 
-        if pf_list is None:
-            pf_list = [identity, identity]
+        pf_list = fill_pf_list(pf_list, n_pf=1)
+        # if pf_list is None:
+        #     pf_list = [identity, identity]
 
-        pf_list = utils.make_list(pf_list)
-        if len(pf_list) == 1:
-            pf_list.append(identity)
-        assert len(pf_list) == 2
+        # pf_list = utils.make_list(pf_list)
+        # if len(pf_list) == 1:
+        #     pf_list.append(identity)
+        # assert len(pf_list) == 2
 
         def read_im(file_name):
             return load_image(file_name, read_channel=3,  pf=pf_list[0])
@@ -134,6 +140,10 @@ class COCO(DataFlow):
 
         def o_caption_len(file_name):
             return [len(self._caption_dict[file_name])]
+
+        def read_filename(file_name):
+            path, file_name = os.path.split(file_name)
+            return [file_name]
 
         self.word_dict = word_dict
         self.n_words = len(word_dict)
@@ -159,11 +169,11 @@ class COCO(DataFlow):
         self.sample_range = sample_range
 
         super(COCO, self).__init__(
-            data_name_list=['.jpg', '.json', '.json'],
-            data_dir=[im_dir, ann_dir, ann_dir],
+            data_name_list=['.jpg', '.json', '.json', '.jpg'],
+            data_dir=[im_dir, ann_dir, ann_dir, ann_dir],
             shuffle=shuffle,
             batch_dict_name=batch_dict_name,
-            load_fnc_list=[read_im, read_caption, o_caption_len],
+            load_fnc_list=[read_im, read_caption, o_caption_len, read_filename],
             )
 
     def _load_file_list(self, data_name_list, data_dir_list):
@@ -180,18 +190,26 @@ class COCO(DataFlow):
             drive, path_and_file = os.path.splitdrive(image_name)
             path, file_name = os.path.split(path_and_file)
             cur_caption_list = imgToAnns[imgToID[file_name]]
-            word_id_list = []
-            for idx, c in enumerate(cur_caption_list):
+            # word_id_list = []
+
+            if self._all_reference:
+                for idx, c in enumerate(cur_caption_list):
+                    self._file_name_list[0].append(image_name)
+                    self._file_name_list[1].append('{}_{}'.format(image_name, idx))
+                    c_id = [self.word_dict[w] if w in self.word_dict
+                            else self.word_dict['UNK'] for w in c]
+                    c_id = [self.word_dict[self._start_word]] + c_id
+                    self._caption_dict['{}_{}'.format(image_name, idx)] = np.array(c_id)
+            else:
                 self._file_name_list[0].append(image_name)
-                self._file_name_list[1].append('{}_{}'.format(image_name, idx))
-                c_id = [self.word_dict[w] if w in self.word_dict
-                        else self.word_dict['UNK'] for w in c]
-                c_id = [self.word_dict[self._start_word]] + c_id
-                self._caption_dict['{}_{}'.format(image_name, idx)] = np.array(c_id)
+                self._file_name_list[1].append(image_name)
+                self._caption_dict[image_name] = np.array(cur_caption_list)
+
                 # word_id_list.append(np.array(c_id))
 
             # self._caption_dict[image_name] = word_id_list
         self._file_name_list[2] = self._file_name_list[1]
+        self._file_name_list[3] = self._file_name_list[0]
         for idx in range(len(self._file_name_list)):
             self._file_name_list[idx] = np.array(self._file_name_list[idx])
         if self._shuffle:

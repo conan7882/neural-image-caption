@@ -98,6 +98,9 @@ class tfrecordData(DataFlow):
         self.coord.request_stop()
         self.coord.join(self.threads)
 
+    def set_epochs_completed(self, val):
+        self._set_epochs_completed(val)
+
     def _set_epochs_completed(self, val):
         self._epochs_completed  = val
         self._batch_step = 0

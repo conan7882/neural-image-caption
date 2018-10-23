@@ -14,11 +14,14 @@ class Image(DataFlow):
                  n_channel=3,
                  shuffle=True,
                  batch_dict_name=None,
-                 pf_list=None):
+                 pf_list=None,
+                 verbose=False):
         pf_list = fill_pf_list(
             pf_list, n_pf=1, fill_with_fnc=identity)
 
         def read_image(file_name):
+            if verbose:
+                print(file_name)
             im = load_image(file_name, read_channel=n_channel,  pf=pf_list[0])
             return im
 

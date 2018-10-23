@@ -16,7 +16,36 @@ from src.dataflow.images import Image
 from src.dataflow.coco import COCO, Inception_COCO
 
 
-def load_test_im(batch_size=2):
+def load_coco_word_dict(stop_word='.', start_word='START', unknonw_word='UNK'):
+    if platform.node() == 'arostitan':
+        ann_dir = '/home/qge2/workspace/data/dataset/COCO/annotations_trainval2014/annotations/'
+    elif platform.node() == 'aros04':
+        ann_dir = 'E:/Dataset/COCO/annotations_trainval2014/annotations/'
+    else:
+        raise ValueError('Data path does not setup on this platform!')
+
+    word_dict = np.load(
+        os.path.join(ann_dir, 'word_dict.npy'), encoding='latin1').item()
+    word_to_id = word_dict['word_to_id']
+
+    n_words = len(word_to_id)
+    if unknonw_word not in word_to_id:
+        word_to_id[unknonw_word] = n_words
+        n_words += 1
+    if stop_word not in word_to_id:
+        word_to_id[stop_word] = n_words
+        n_words += 1
+    if start_word not in word_to_id:
+        word_to_id[start_word] = n_words
+        n_words += 1
+
+    id_to_word = {}
+    for key in word_to_id:
+        id_to_word[word_to_id[key]] = key
+    
+    return word_to_id, id_to_word
+
+def load_test_im(batch_size=2, verbose=False):
     def preprocess_im(im):
         im = skimage.transform.resize(
             im, [224, 224, 3],
@@ -31,14 +60,16 @@ def load_test_im(batch_size=2):
                     n_channel=3,
                     shuffle=False,
                     batch_dict_name=['image'],
-                    pf_list=preprocess_im)
+                    pf_list=preprocess_im,
+                    verbose=verbose)
     im_data.setup(epoch_val=0, batch_size=batch_size) 
     return im_data
 
 def load_inception_coco(batch_size, shuffle=True):
     if platform.node() == 'arostitan':
         tfrecord_dir = '/home/qge2/workspace/data/dataset/COCO/tfdata/'
-        tfname = ['coco_caption_train{}.tfrecords'.format(i) for i in range(6)]
+        tfname_train = ['coco_caption_train{}.tfrecords'.format(i) for i in range(6)]
+        tfname_valid = ['coco_caption_valid{}.tfrecords'.format(i) for i in range(1)]
         # tfname = ['coco_caption_train0.tfrecords', 'coco_caption_train1.tfrecords']
         ann_dir = '/home/qge2/workspace/data/dataset/COCO/annotations_trainval2014/annotations/'
     # elif platform.node() == 'Qians-MacBook-Pro.local':
@@ -54,16 +85,24 @@ def load_inception_coco(batch_size, shuffle=True):
     word_dict = np.load(
         os.path.join(ann_dir, 'word_dict.npy'), encoding='latin1').item()
 
-    tf_dir = [os.path.join(tfrecord_dir, name) for name in tfname]
+    tf_dir = [os.path.join(tfrecord_dir, name) for name in tfname_train]
     train_data = Inception_COCO(
         tf_dir=tf_dir, word_dict=word_dict['word_to_id'],
         batch_dict_name=['image', 'caption', 'mask'],
-        shuffle=True)
-    train_data.setup(epoch_val=0, batch_size=batch_size)  
+        shuffle=shuffle)
+    train_data.setup(epoch_val=0, batch_size=batch_size) 
 
-    return train_data
+    tf_dir = [os.path.join(tfrecord_dir, name) for name in tfname_valid]
+    valid_data = Inception_COCO(
+        tf_dir=tf_dir, word_dict=word_dict['word_to_id'],
+        batch_dict_name=['image', 'caption', 'mask'],
+        shuffle=False)
+    valid_data.setup(epoch_val=0, batch_size=batch_size)   
 
-def load_coco(batch_size, rescale_size=224, shuffle=True, pad_with_max_len=False):
+    return train_data, valid_data
+
+def load_coco(batch_size, load_range, rescale_size=224, shuffle=True,
+              pad_with_max_len=False, is_all_reference=False):
     """ Load COCO data with caption
 
     Args:
@@ -101,30 +140,32 @@ def load_coco(batch_size, rescale_size=224, shuffle=True, pad_with_max_len=False
     word_dict = np.load(
         os.path.join(ann_dir, 'word_dict.npy'), encoding='latin1').item()
     # ann_path = os.path.join(ann_dir, 'captions_train2014.json')
-    train_data = COCO(
-        sample_range=[0, 200],
-        word_dict=word_dict['word_to_id'], 
-        max_caption_len=60,
-        pad_with_max_len=pad_with_max_len,
-        im_dir=im_dir,
-        ann_dir=ann_dir,
-        shuffle=True,
-        batch_dict_name=['image', 'caption', 'o_len'],
-        pf_list=[preprocess_im, None])
-    train_data.setup(epoch_val=0, batch_size=batch_size)
-
-    valid_data = COCO(
-        sample_range=[40000, 40010],
+    data = COCO(
+        sample_range=load_range,
         word_dict=word_dict['word_to_id'], 
         max_caption_len=60,
         pad_with_max_len=pad_with_max_len,
         im_dir=im_dir,
         ann_dir=ann_dir,
         shuffle=shuffle,
-        batch_dict_name=['image', 'caption', 'o_len'],
-        pf_list=[preprocess_im, None])
-    valid_data.setup(epoch_val=0, batch_size=batch_size)
-    return train_data, valid_data
+        batch_dict_name=['image', 'caption', 'o_len', 'filename'],
+        pf_list=[preprocess_im],
+        is_all_reference=is_all_reference)
+    data.setup(epoch_val=0, batch_size=batch_size)
+
+    # valid_data = COCO(
+    #     sample_range=[40000, 40010],
+    #     word_dict=word_dict['word_to_id'], 
+    #     max_caption_len=60,
+    #     pad_with_max_len=pad_with_max_len,
+    #     im_dir=im_dir,
+    #     ann_dir=ann_dir,
+    #     shuffle=shuffle,
+    #     batch_dict_name=['image', 'caption', 'o_len'],
+    #     pf_list=[preprocess_im, None],
+    #     is_all_reference=is_all_reference)
+    # valid_data.setup(epoch_val=0, batch_size=batch_size)
+    return data
 
 if __name__ == '__main__':
     # ann_dir = '/Users/gq/workspace/Dataset/coco/annotations_trainval2014/'

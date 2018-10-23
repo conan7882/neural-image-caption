@@ -123,7 +123,7 @@ class NIC(BaseModel):
             bn=BN,
             is_training=self.is_training,
             name='image_embedding_linear',
-            # nl=tf.identity,
+            nl=tf.nn.relu,
             add_summary=False)
         image_embedding = tf.reshape(image_embedding, (-1, 1, self._embedding_dim))
 
