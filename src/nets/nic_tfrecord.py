@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-# File: nic.py
+# File: nic_tfrecord.py
 # Author: Qian Ge <geqian1001@gmail.com>
 
 import numpy as np
@@ -16,12 +16,12 @@ import src.models.inception_module as inception_module
 INIT_W = tf.keras.initializers.he_normal()
 BN = False
 
-class NIC(BaseModel):
+class NIC_tfrecord(BaseModel):
 
     # def __init__(self, n_channel, n_class, pre_trained_path=None,
     #              bn=False, wd=0, trainable=True, sub_vgg_mean=True):
-    def __init__(self, n_channel, vocab_size, embedding_dim, rnn_hidden_list,
-                 inception_path,
+    def __init__(self, vocab_size, embedding_dim, rnn_hidden_list,
+                 inception_path=None, n_channel=None,
                  start_word_id=None, stop_word_id=None,
                  bsize=None, num_beam=20, max_step=20):
         self._n_channel = n_channel
@@ -33,29 +33,20 @@ class NIC(BaseModel):
         self._n_beam = num_beam
         self._max_step = max_step
 
-        self._pretrained_dict = np.load(
-            inception_path, encoding='latin1').item()
+        if inception_path is not None:
+            self._pretrained_dict = np.load(
+                inception_path, encoding='latin1').item()
 
         if not isinstance(rnn_hidden_list, list):
             rnn_hidden_list = [rnn_hidden_list]
         self._hidden = rnn_hidden_list
         self._n_hidden = len(rnn_hidden_list)
-        # self.n_class = n_class
-        # self._bn = bn
-        # self._wd = wd
-        # self._trainable = trainable
-        # self._sub_vgg_mean = sub_vgg_mean
-
-        # self._pretrained_dict = None
-        # if pre_trained_path:
-        #     self._pretrained_dict = np.load(
-        #         pre_trained_path, encoding='latin1').item()
 
         self.layers = {}
 
     def _create_train_input(self):
-        self.image = tf.placeholder(
-            tf.float32, [None, 224, 224, self._n_channel], name='image')
+        self.image_feat = tf.placeholder(
+            tf.float32, [None, 7, 7, 1024], name='image_feat')
         self.label = tf.placeholder(tf.int64, [None, None], 'label')
         self.keep_prob = tf.placeholder(tf.float32, name='keep_prob')
         self.lr = tf.placeholder(tf.float32, name='lr')
@@ -64,7 +55,7 @@ class NIC(BaseModel):
         self.set_is_training(is_training=True)
         self._create_train_input()
         with tf.variable_scope('model', reuse=tf.AUTO_REUSE):
-            image_embedding, words_embedding = self._embedding_layer(self.image, self.label)
+            image_embedding, words_embedding = self._embedding_layer(self.image_feat, self.label, compute_feat=False)
             out_logits = self._rnn(image_embedding, words_embedding)
 
         self.layers['out_logits'] = out_logits
@@ -92,28 +83,20 @@ class NIC(BaseModel):
             image_embedding, words_embedding = self._embedding_layer(self.image, start_word)
             self.layers['generate'] = self._generate_sequence(image_embedding, words_embedding)
         
-    #     if self._sub_vgg_mean:
-    #         vgg_input = module.sub_rgb2bgr_mean(self.image)
-    #     else:
-    #         vgg_input = self.image
-
-    #     with tf.variable_scope('conv_layers', reuse=tf.AUTO_REUSE):
-    #         self.layers['conv_out'] = self._conv_layers(vgg_input)
-    #     with tf.variable_scope('fc_layers', reuse=tf.AUTO_REUSE):   
-    #         self.layers['logits'] = self._fc_layers(self.layers['conv_out'])
-    #         self.layers['gap_out'] = L.global_avg_pool(self.layers['logits'])
-
-    def _embedding_layer(self, image_inputs, words_inputs):
+    def _embedding_layer(self, image_inputs, words_inputs, compute_feat=True):
         words_embedding = modules.word_embedding_layer(
             inputs=words_inputs,
             vocab_size=self._vocab_size,
             embedding_dim=self._embedding_dim,
             name='word_embedding_layer')
 
-        inception_conv_out = inception_module.Inception_conv_embedding(
-            inputs=image_inputs,
-            pretrained_dict=self._pretrained_dict,
-            name='Inception_conv')
+        if compute_feat:
+            inception_conv_out = inception_module.Inception_conv_embedding(
+                inputs=image_inputs,
+                pretrained_dict=self._pretrained_dict,
+                name='Inception_conv')
+        else:
+            inception_conv_out = image_inputs
 
         image_embedding = L.linear(
             out_dim=self._embedding_dim,
@@ -271,7 +254,7 @@ class NIC(BaseModel):
             _, loss = sess.run(
                 [self.train_op, self.loss_op],
                 feed_dict={self.label: batch_data['caption'],
-                           self.image: batch_data['image'],
+                           self.image_feat: batch_data['image'],
                            self.keep_prob: keep_prob,
                            self.lr: lr})
 
@@ -312,56 +295,3 @@ class NIC(BaseModel):
             'train',
             summary_val=cur_summary,
             summary_writer=summary_writer)
-
-
-
-
-    # def create_test_model(self):
-    #     self.set_is_training(is_training=False)
-    #     self._create_test_input()
-    #     if self._sub_vgg_mean:
-    #         vgg_input = module.sub_rgb2bgr_mean(self.image)
-    #     else:
-    #         vgg_input = self.image
-
-    #     with tf.variable_scope('conv_layers', reuse=tf.AUTO_REUSE):
-    #         self.layers['conv_out'] = self._conv_layers(vgg_input)
-    #     with tf.variable_scope('fc_layers', reuse=tf.AUTO_REUSE):   
-    #         self.layers['logits'] = self._fc_layers(self.layers['conv_out'])
-    #         self.layers['gap_out'] = L.global_avg_pool(self.layers['logits'])
-    #         self.layers['top_5'] = tf.nn.top_k(
-    #             tf.nn.softmax(self.layers['gap_out']), k=5, sorted=True)
-
-    # def _conv_layers(self, inputs):
-    #     raise NotImplementedError()
-
-    # def _fc_layers(self, inputs):
-    #     fc_out = module.vgg_fc(
-    #         layer_dict=self.layers, n_class=self.n_class, keep_prob=self.keep_prob,
-    #         inputs=inputs, pretrained_dict=self._pretrained_dict,
-    #         bn=self._bn, init_w=INIT_W, trainable=self._trainable,
-    #         is_training=self.is_training, wd=self._wd)
-    #     return fc_out
-
-    # def _get_loss(self):
-    #     with tf.name_scope('loss'):
-    #         labels = self.label
-    #         logits = self.layers['gap_out']
-    #         # logits = tf.squeeze(logits, axis=1)
-    #         cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
-    #             labels=labels,
-    #             logits=logits,
-    #             name='cross_entropy')
-    #         return tf.reduce_mean(cross_entropy)
-
-    # def _get_optimizer(self):
-    #     return tf.train.AdamOptimizer(self.lr)
-
-    # def get_accuracy(self):
-    #     with tf.name_scope('accuracy'):
-    #         prediction = tf.argmax(self.layers['gap_out'], axis=1)
-    #         correct_prediction = tf.equal(prediction, self.label)
-    #         return tf.reduce_mean(
-    #             tf.cast(correct_prediction, tf.float32), 
-    #             name = 'result')
-

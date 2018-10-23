@@ -35,3 +35,10 @@ def get_shape2D(in_val):
         assert len(in_val) == 2
         return in_val
     raise RuntimeError('Illegal shape: {}'.format(in_val))
+
+def assert_type(v, tp):
+    """
+    Assert type of input v be type tp
+    """
+    assert isinstance(v, tp),\
+        "Expect " + str(tp) + ", but " + str(v.__class__) + " is given!"
