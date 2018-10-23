@@ -234,8 +234,8 @@ class NIC(BaseModel):
             label = label[:, 1:]
             label = tf.reshape(label, [-1])
 
-            self.test1 = label
-            self.test2 = tf.argmax(self.layers['out_logits'], axis=-1)
+            # self.test1 = label
+            # self.test2 = tf.argmax(self.layers['out_logits'], axis=-1)
             cross_entropy_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(
                 labels=label, logits=self.layers['out_logits'], name='cross_entropy_loss')
             return tf.reduce_mean(cross_entropy_loss)

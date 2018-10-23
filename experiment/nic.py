@@ -42,7 +42,7 @@ def get_args():
 
     parser.add_argument('--load', type=int, default=99,
                         help='Load step of pre-trained')
-    parser.add_argument('--lr', type=float, default=5e-4,
+    parser.add_argument('--lr', type=float, default=1e-3,
                         help='Init learning rate')
     parser.add_argument('--keep_prob', type=float, default=1.,
                         help='keep_prob')
@@ -62,8 +62,9 @@ def get_args():
 def train_tfrecord():
     FLAGS = get_args()
     train_data = loader.load_inception_coco(batch_size=FLAGS.bsize, shuffle=True)
-    _, valid_data = loader.load_coco(batch_size=FLAGS.bsize)
-    valid_data.setup(epoch_val=0, batch_size=2)
+    train_data_origin, valid_data = loader.load_coco(batch_size=2)
+    # valid_data.setup(epoch_val=0, batch_size=2)
+    test_image_data = loader.load_test_im(batch_size=2)
 
     id_to_word = train_data.id_to_word
     word_to_id = train_data.word_dict
@@ -104,6 +105,19 @@ def train_tfrecord():
                 keep_prob=0.5, summary_writer=writer)
             saver.save(sess, '{}epoch-{}'.format(SAVE_PATH, epoch_id))
 
+            print('======= Train =======')
+            batch_data = train_data_origin.next_batch_dict()
+            generate_text = sess.run(
+                generate_model.layers['generate'],
+                # [generate_model.test1, generate_model.test2],
+                feed_dict={generate_model.image: batch_data['image']})
+            for text in generate_text:
+                print([id_to_word[w_id] for w_id in text])
+            print('-- label --')
+            for text in batch_data['caption']:
+                print([id_to_word[w_id] for w_id in text])
+
+            print('======= Valid =======')
             batch_data = valid_data.next_batch_dict()
             generate_text = sess.run(
                 generate_model.layers['generate'],
@@ -114,6 +128,16 @@ def train_tfrecord():
             print('-- label --')
             for text in batch_data['caption']:
                 print([id_to_word[w_id] for w_id in text])
+
+            print('======= Test =======')
+            batch_data = test_image_data.next_batch_dict()
+            generate_text = sess.run(
+                generate_model.layers['generate'],
+                # [generate_model.test1, generate_model.test2],
+                feed_dict={generate_model.image: batch_data['image']})
+            for text in generate_text:
+                print([id_to_word[w_id] for w_id in text])
+                
             # print(test1)
             # print(list(test2))
             # break

@@ -61,9 +61,13 @@ class Inception_COCO(DataFlow):
 
         max_len = np.amax(batch_o_len)
         truncate_caption = []
-        for caption in batch_caption:
+        caption_mask = []
+        for caption, o_len in zip(batch_caption, batch_o_len):
             cur_caption = np.concatenate((caption[:max_len], [self.word_dict[self._stop_word]]), axis=0)
             truncate_caption.append(cur_caption)
+            # remove first start
+            cur_mask = [1 if i < o_len - 1 else 0 for i in range(max_len)]
+            caption_mask.append(cur_mask)
 
         # for key in imgToAnns:
         #     cur_caption_list = imgToAnns[key]
@@ -72,7 +76,9 @@ class Inception_COCO(DataFlow):
         #         if len_c > max_len:
         #             max_len = len_c
         # self.word_dict[self._stop_word]
-        batch_data = [np.array(raw_batch_data[0]), np.array(truncate_caption), np.array(raw_batch_data[2])]
+        # print(np.array(truncate_caption))
+        # print(np.array(caption_mask))
+        batch_data = [np.array(raw_batch_data[0]), np.array(truncate_caption), np.array(caption_mask)]
         return batch_data
 
     def _set_epochs_completed(self, val):

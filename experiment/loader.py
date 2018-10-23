@@ -12,12 +12,34 @@ import numpy as np
 # import matplotlib.pyplot as plt
 
 sys.path.append('../')
+from src.dataflow.images import Image
 from src.dataflow.coco import COCO, Inception_COCO
+
+
+def load_test_im(batch_size=2):
+    def preprocess_im(im):
+        im = skimage.transform.resize(
+            im, [224, 224, 3],
+            mode='reflect',
+            preserve_range=True)
+
+        return im.astype(np.uint8)
+
+    im_dir = '/home/qge2/workspace/data/test_im/'
+    im_data = Image(im_name='.jpg',
+                    data_dir=im_dir,
+                    n_channel=3,
+                    shuffle=False,
+                    batch_dict_name=['image'],
+                    pf_list=preprocess_im)
+    im_data.setup(epoch_val=0, batch_size=batch_size) 
+    return im_data
 
 def load_inception_coco(batch_size, shuffle=True):
     if platform.node() == 'arostitan':
         tfrecord_dir = '/home/qge2/workspace/data/dataset/COCO/tfdata/'
-        tfname = ['coco_caption_train0.tfrecords', 'coco_caption_train1.tfrecords']
+        tfname = ['coco_caption_train{}.tfrecords'.format(i) for i in range(6)]
+        # tfname = ['coco_caption_train0.tfrecords', 'coco_caption_train1.tfrecords']
         ann_dir = '/home/qge2/workspace/data/dataset/COCO/annotations_trainval2014/annotations/'
     # elif platform.node() == 'Qians-MacBook-Pro.local':
     #     im_dir = '/Users/gq/workspace/Dataset/coco/train2014_small/'
@@ -35,7 +57,7 @@ def load_inception_coco(batch_size, shuffle=True):
     tf_dir = [os.path.join(tfrecord_dir, name) for name in tfname]
     train_data = Inception_COCO(
         tf_dir=tf_dir, word_dict=word_dict['word_to_id'],
-        batch_dict_name=['image', 'caption', 'o_len'],
+        batch_dict_name=['image', 'caption', 'mask'],
         shuffle=True)
     train_data.setup(epoch_val=0, batch_size=batch_size)  
 
@@ -80,7 +102,7 @@ def load_coco(batch_size, rescale_size=224, shuffle=True, pad_with_max_len=False
         os.path.join(ann_dir, 'word_dict.npy'), encoding='latin1').item()
     # ann_path = os.path.join(ann_dir, 'captions_train2014.json')
     train_data = COCO(
-        # sample_range=[10, 20010],
+        sample_range=[0, 200],
         word_dict=word_dict['word_to_id'], 
         max_caption_len=60,
         pad_with_max_len=pad_with_max_len,

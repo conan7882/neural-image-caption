@@ -32,7 +32,7 @@ else:
 def parse_caption(inputs, shape):
     return tf.FixedLenSequenceFeature(inputs, shape, allow_missing=True)
 
-def load_data():
+def load_data(load_range=[0, 10]):
     if platform.node() == 'arostitan':
         im_dir = '/home/qge2/workspace/data/dataset/COCO/train2014/'
         ann_dir = '/home/qge2/workspace/data/dataset/COCO/annotations_trainval2014/annotations/'
@@ -56,7 +56,7 @@ def load_data():
         os.path.join(ann_dir, 'word_dict.npy'), encoding='latin1').item()
     # ann_path = os.path.join(ann_dir, 'captions_train2014.json')
     train_data = COCO(
-        sample_range=[15000, 20000],
+        sample_range=load_range,
         word_dict=word_dict['word_to_id'], 
         max_caption_len=60,
         pad_with_max_len=True,
@@ -119,7 +119,7 @@ def read():
         #     cnt += 1
         data.after_reading()
 
-def write():
+def write(file_id, load_range):
     image = tf.placeholder(
         tf.float32, [None, 224, 224, 3], name='image')
     pretrained_dict = np.load(
@@ -136,8 +136,8 @@ def write():
             feed_dict={image: batch_data['image']})
         return feat
 
-    save_tfrecord_path = os.path.join(SAVE_PATH, 'coco_caption_train3.tfrecords')
-    train_data = load_data()
+    save_tfrecord_path = os.path.join(SAVE_PATH, 'coco_caption_train{}.tfrecords'.format(file_id))
+    train_data = load_data(load_range)
     tfwriter = Bottleneck2TFrecord('inception_feat')
     tfwriter.write(
         tfname=save_tfrecord_path,
@@ -148,5 +148,6 @@ def write():
         convert_fncs=[int64_feature, int64_feature])
 
 if __name__ == '__main__':
-    write()
+    # write(4, [20000, 25000])
+    write(5, [25000, 30000])
     # read()

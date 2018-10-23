@@ -8,6 +8,7 @@ import tensorflow as tf
 
 from src.nets.base import BaseModel
 import src.utils.viz as viz
+from src.utils.tfutils import apply_mask
 import src.models.layers as L
 import src.models.modules as modules
 import src.models.inception_module as inception_module
@@ -48,6 +49,7 @@ class NIC_tfrecord(BaseModel):
         self.image_feat = tf.placeholder(
             tf.float32, [None, 7, 7, 1024], name='image_feat')
         self.label = tf.placeholder(tf.int64, [None, None], 'label')
+        self.valid_mask = tf.placeholder(tf.int32, [None, None], 'valid_mask')
         self.keep_prob = tf.placeholder(tf.float32, name='keep_prob')
         self.lr = tf.placeholder(tf.float32, name='lr')
 
@@ -64,6 +66,7 @@ class NIC_tfrecord(BaseModel):
         self.global_step = 0
         self.train_op = self.get_train_op()
         self.loss_op = self.get_loss()
+        self.cur_lr = None
 
     def _create_generate_input(self):
         self.image = tf.placeholder(
@@ -216,11 +219,11 @@ class NIC_tfrecord(BaseModel):
             # remove the first START sign
             label = label[:, 1:]
             label = tf.reshape(label, [-1])
-
-            self.test1 = label
-            self.test2 = tf.argmax(self.layers['out_logits'], axis=-1)
+            mask = tf.reshape(self.valid_mask, [-1])
             cross_entropy_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(
-                labels=label, logits=self.layers['out_logits'], name='cross_entropy_loss')
+                labels=apply_mask(label, mask),
+                logits=apply_mask(self.layers['out_logits'], mask),
+                name='cross_entropy_loss')
             return tf.reduce_mean(cross_entropy_loss)
 
     def get_train_op(self):
@@ -240,7 +243,12 @@ class NIC_tfrecord(BaseModel):
         display_name_list = ['loss']
         cur_summary = None
 
-        lr = init_lr
+        if self.cur_lr is None:
+            self.cur_lr = init_lr
+            lr = init_lr
+        else:
+            self.cur_lr = self.cur_lr * 0.96
+            lr = self.cur_lr
 
         cur_epoch = train_data.epochs_completed
         step = 0
@@ -255,6 +263,7 @@ class NIC_tfrecord(BaseModel):
                 [self.train_op, self.loss_op],
                 feed_dict={self.label: batch_data['caption'],
                            self.image_feat: batch_data['image'],
+                           self.valid_mask: batch_data['mask'],
                            self.keep_prob: keep_prob,
                            self.lr: lr})
 
