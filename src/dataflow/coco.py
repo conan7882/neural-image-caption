@@ -20,7 +20,7 @@ def identity(inputs):
 class Inception_COCO(DataFlow):
     def __init__(self, word_dict, tf_dir, batch_dict_name,
                  stop_word='.', start_word='START', shuffle=True,
-                 is_all_reference=False):
+                 is_all_reference=False, ann_dir=None):
     
         self._batch_dict_name = batch_dict_name
         self.word_dict = word_dict
@@ -43,7 +43,12 @@ class Inception_COCO(DataFlow):
             id_to_word[word_dict[key]] = key
         self.id_to_word = id_to_word
 
+        self._all_reference = is_all_reference
         if is_all_reference:
+            assert ann_dir is not None
+            self._ann_dir = ann_dir
+            # imgToAnns, imgToID = self._load_ann_data(ann_dir)
+            # cur_caption_list = imgToAnns[imgToID[file_name]]
             self.tfdata = tfrecordData(
                 tfname=tf_dir,
                 record_names=['inception_feat', 'filename'],
@@ -70,30 +75,49 @@ class Inception_COCO(DataFlow):
 
     def next_batch(self):
         raw_batch_data = self.tfdata.next_batch()
-        batch_caption = raw_batch_data[1]
-        batch_o_len = raw_batch_data[2]
 
-        max_len = np.amax(batch_o_len)
-        truncate_caption = []
-        caption_mask = []
-        for caption, o_len in zip(batch_caption, batch_o_len):
-            cur_caption = np.concatenate((caption[:max_len], [self.word_dict[self._stop_word]]), axis=0)
-            truncate_caption.append(cur_caption)
-            # remove first start
-            cur_mask = [1 if i < o_len - 1 else 0 for i in range(max_len)]
-            caption_mask.append(cur_mask)
+        if self._all_reference:
+            imgToAnns, imgToID = self._load_ann_data(self._ann_dir)
+            batch_file_name = raw_batch_data[1]
+            caption_list = []
+            for file_name in batch_file_name:
+                all_reference_caption = imgToAnns[imgToID[file_name]]
+                caption_list.append(np.array(all_reference_caption))
+            batch_data = [np.array(raw_batch_data[0]), np.array(caption_list)]
+        else:
+            batch_caption = raw_batch_data[1]
+            batch_o_len = raw_batch_data[2]
 
-        # for key in imgToAnns:
-        #     cur_caption_list = imgToAnns[key]
-        #     for c in cur_caption_list:
-        #         len_c = len(c)
-        #         if len_c > max_len:
-        #             max_len = len_c
-        # self.word_dict[self._stop_word]
-        # print(np.array(truncate_caption))
-        # print(np.array(caption_mask))
-        batch_data = [np.array(raw_batch_data[0]), np.array(truncate_caption), np.array(caption_mask)]
+            max_len = np.amax(batch_o_len)
+            truncate_caption = []
+            caption_mask = []
+            for caption, o_len in zip(batch_caption, batch_o_len):
+                cur_caption = np.concatenate((caption[:max_len], [self.word_dict[self._stop_word]]), axis=0)
+                truncate_caption.append(cur_caption)
+                # remove first start
+                cur_mask = [1 if i < o_len - 1 else 0 for i in range(max_len)]
+                caption_mask.append(cur_mask)
+            batch_data = [np.array(raw_batch_data[0]), np.array(truncate_caption), np.array(caption_mask)]
         return batch_data
+
+    def _load_ann_data(self, ann_dir):
+        annotations = np.load(
+            os.path.join(ann_dir, 'annotations.npy'),
+            encoding='latin1').item()
+        imgToAnns = annotations['imgToAnns']
+        imgToID = annotations['imgToID']
+
+        if self.max_len is None:
+            max_len = 0
+            for key in imgToAnns:
+                cur_caption_list = imgToAnns[key]
+                for c in cur_caption_list:
+                    len_c = len(c)
+                    if len_c > max_len:
+                        max_len = len_c
+            self.max_len = max_len
+
+        return imgToAnns, imgToID
 
     def set_epochs_completed(self, val):
         self.tfdata.set_epochs_completed(val)
