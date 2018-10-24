@@ -19,7 +19,8 @@ def identity(inputs):
 
 class Inception_COCO(DataFlow):
     def __init__(self, word_dict, tf_dir, batch_dict_name,
-                 stop_word='.', start_word='START', shuffle=True):
+                 stop_word='.', start_word='START', shuffle=True,
+                 is_all_reference=False):
     
         self._batch_dict_name = batch_dict_name
         self.word_dict = word_dict
@@ -42,17 +43,30 @@ class Inception_COCO(DataFlow):
             id_to_word[word_dict[key]] = key
         self.id_to_word = id_to_word
 
-        self.tfdata = tfrecordData(
-            tfname=tf_dir,
-            record_names=['inception_feat', 'caption', 'o_len'],
-            record_parse_list=[tf.FixedLenFeature, tf.FixedLenFeature, tf.FixedLenFeature],
-            record_types=[tf.float32, tf.int64, tf.int64],
-            raw_types=[tf.float32, tf.int64, tf.int64],
-            decode_fncs=[tf.cast, tf.cast, tf.cast],
-            batch_dict_name=['inception_feat', 'caption', 'o_len'],
-            feature_len_list=[[50176], [61]],
-            data_shape=[[7, 7, 1024], [61]],
-            shuffle=shuffle)
+        if is_all_reference:
+            self.tfdata = tfrecordData(
+                tfname=tf_dir,
+                record_names=['inception_feat', 'filename'],
+                record_parse_list=[tf.FixedLenFeature, tf.FixedLenFeature],
+                record_types=[tf.float32, tf.string],
+                raw_types=[tf.float32, tf.string],
+                decode_fncs=[tf.cast, tf.cast],
+                batch_dict_name=['inception_feat', 'filename'],
+                feature_len_list=[[50176], []],
+                data_shape=[[7, 7, 1024], []],
+                shuffle=shuffle)
+        else:
+            self.tfdata = tfrecordData(
+                tfname=tf_dir,
+                record_names=['inception_feat', 'caption', 'o_len'],
+                record_parse_list=[tf.FixedLenFeature, tf.FixedLenFeature, tf.FixedLenFeature],
+                record_types=[tf.float32, tf.int64, tf.int64],
+                raw_types=[tf.float32, tf.int64, tf.int64],
+                decode_fncs=[tf.cast, tf.cast, tf.cast],
+                batch_dict_name=['inception_feat', 'caption', 'o_len'],
+                feature_len_list=[[50176], [61]],
+                data_shape=[[7, 7, 1024], [61]],
+                shuffle=shuffle)
 
     def next_batch(self):
         raw_batch_data = self.tfdata.next_batch()
@@ -124,13 +138,6 @@ class COCO(DataFlow):
         self._all_reference = is_all_reference
 
         pf_list = fill_pf_list(pf_list, n_pf=1)
-        # if pf_list is None:
-        #     pf_list = [identity, identity]
-
-        # pf_list = utils.make_list(pf_list)
-        # if len(pf_list) == 1:
-        #     pf_list.append(identity)
-        # assert len(pf_list) == 2
 
         def read_im(file_name):
             return load_image(file_name, read_channel=3,  pf=pf_list[0])
@@ -143,7 +150,7 @@ class COCO(DataFlow):
 
         def read_filename(file_name):
             path, file_name = os.path.split(file_name)
-            return [file_name]
+            return file_name
 
         self.word_dict = word_dict
         self.n_words = len(word_dict)
@@ -177,7 +184,7 @@ class COCO(DataFlow):
             )
 
     def _load_file_list(self, data_name_list, data_dir_list):
-        self._file_name_list = [[] for i in range(3)]
+        self._file_name_list = [[] for i in range(4)]
         image_name_list = get_file_list(data_dir_list[0], data_name_list[0])
         if self.sample_range is not None:
             image_name_list = image_name_list[self.sample_range[0]: self.sample_range[1]]
@@ -193,6 +200,10 @@ class COCO(DataFlow):
             # word_id_list = []
 
             if self._all_reference:
+                self._file_name_list[0].append(image_name)
+                self._file_name_list[1].append(image_name)
+                self._caption_dict[image_name] = np.array(cur_caption_list)
+            else:
                 for idx, c in enumerate(cur_caption_list):
                     self._file_name_list[0].append(image_name)
                     self._file_name_list[1].append('{}_{}'.format(image_name, idx))
@@ -200,10 +211,7 @@ class COCO(DataFlow):
                             else self.word_dict['UNK'] for w in c]
                     c_id = [self.word_dict[self._start_word]] + c_id
                     self._caption_dict['{}_{}'.format(image_name, idx)] = np.array(c_id)
-            else:
-                self._file_name_list[0].append(image_name)
-                self._file_name_list[1].append(image_name)
-                self._caption_dict[image_name] = np.array(cur_caption_list)
+                
 
                 # word_id_list.append(np.array(c_id))
 

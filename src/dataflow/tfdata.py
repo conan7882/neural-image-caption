@@ -15,6 +15,10 @@ def int64_feature(value):
 def float_feature(value):
     return tf.train.Feature(float_list=tf.train.FloatList(value=value))
 
+def bytes_feature(value):
+    value = tf.compat.as_bytes(value)
+    return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
+
 
 class tfrecordData(DataFlow):
     def __init__(self,

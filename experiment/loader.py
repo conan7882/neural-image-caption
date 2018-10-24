@@ -15,15 +15,29 @@ sys.path.append('../')
 from src.dataflow.images import Image
 from src.dataflow.coco import COCO, Inception_COCO
 
+if platform.node() == 'arostitan':
+    im_dir = '/home/qge2/workspace/data/dataset/COCO/train2014/'
+    tfrecord_dir = '/home/qge2/workspace/data/dataset/COCO/tfdata/'
+    tfname_train = ['coco_caption_train{}.tfrecords'.format(i) for i in range(6)]
+    tfname_valid = ['coco_caption_valid{}.tfrecords'.format(i) for i in range(1)]
+    ann_dir = '/home/qge2/workspace/data/dataset/COCO/annotations_trainval2014/annotations/'
+elif platform.node() == 'aros04':
+    im_dir = 'E:/Dataset/COCO/train2014_small/'
+    tfrecord_dir = 'E:/Dataset/COCO/tfrecord/'
+    tfname = ['coco_caption_train1.tfrecords']
+    ann_dir = 'E:/Dataset/COCO/annotations_trainval2014/annotations/'
+elif platform.node() == 'Qians-MacBook-Pro.local':
+    im_dir = '/Users/gq/workspace/Dataset/coco/train2014_small/'
+    tfrecord_dir = '/Users/gq/workspace/Dataset/coco/tfrecord/'
+    ann_dir = '/Users/gq/workspace/Dataset/coco/annotations_trainval2014/'
+    tfname_train = ['test_2.tfrecords']
+    tfname_valid = ['test.tfrecords']
+else:
+    raise ValueError('Data path does not setup on this platform!')
+
 
 def load_coco_word_dict(stop_word='.', start_word='START', unknonw_word='UNK'):
-    if platform.node() == 'arostitan':
-        ann_dir = '/home/qge2/workspace/data/dataset/COCO/annotations_trainval2014/annotations/'
-    elif platform.node() == 'aros04':
-        ann_dir = 'E:/Dataset/COCO/annotations_trainval2014/annotations/'
-    else:
-        raise ValueError('Data path does not setup on this platform!')
-
+    
     word_dict = np.load(
         os.path.join(ann_dir, 'word_dict.npy'), encoding='latin1').item()
     word_to_id = word_dict['word_to_id']
@@ -66,21 +80,6 @@ def load_test_im(batch_size=2, verbose=False):
     return im_data
 
 def load_inception_coco(batch_size, shuffle=True):
-    if platform.node() == 'arostitan':
-        tfrecord_dir = '/home/qge2/workspace/data/dataset/COCO/tfdata/'
-        tfname_train = ['coco_caption_train{}.tfrecords'.format(i) for i in range(6)]
-        tfname_valid = ['coco_caption_valid{}.tfrecords'.format(i) for i in range(1)]
-        # tfname = ['coco_caption_train0.tfrecords', 'coco_caption_train1.tfrecords']
-        ann_dir = '/home/qge2/workspace/data/dataset/COCO/annotations_trainval2014/annotations/'
-    # elif platform.node() == 'Qians-MacBook-Pro.local':
-    #     im_dir = '/Users/gq/workspace/Dataset/coco/train2014_small/'
-    #     ann_dir = '/Users/gq/workspace/Dataset/coco/annotations_trainval2014/'
-    elif platform.node() == 'aros04':
-        tfrecord_dir = 'E:/Dataset/COCO/tfrecord/'
-        tfname = ['coco_caption_train1.tfrecords']
-        ann_dir = 'E:/Dataset/COCO/annotations_trainval2014/annotations/'
-    else:
-        raise ValueError('Data path does not setup on this platform!')
 
     word_dict = np.load(
         os.path.join(ann_dir, 'word_dict.npy'), encoding='latin1').item()
@@ -113,18 +112,6 @@ def load_coco(batch_size, load_range, rescale_size=224, shuffle=True,
     Retuns:
         COCO dataflow with image and caption
     """
-
-    if platform.node() == 'arostitan':
-        im_dir = '/home/qge2/workspace/data/dataset/COCO/train2014/'
-        ann_dir = '/home/qge2/workspace/data/dataset/COCO/annotations_trainval2014/annotations/'
-    elif platform.node() == 'Qians-MacBook-Pro.local':
-        im_dir = '/Users/gq/workspace/Dataset/coco/train2014_small/'
-        ann_dir = '/Users/gq/workspace/Dataset/coco/annotations_trainval2014/'
-    elif platform.node() == 'aros04':
-        im_dir = 'E:/Dataset/COCO/train2014_small/'
-        ann_dir = 'E:/Dataset/COCO/annotations_trainval2014/annotations/'
-    else:
-        raise ValueError('Data path does not setup on this platform!')
 
     def preprocess_im(im):
         if rescale_size is not None:
